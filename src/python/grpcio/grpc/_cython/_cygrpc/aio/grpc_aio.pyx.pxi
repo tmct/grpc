@@ -57,7 +57,6 @@ cdef _actual_aio_initialization():
         _GRPC_ASYNCIO_ENGINE,
         _default_asyncio_engine(),
     )
-    _LOGGER.debug('Using %s as I/O engine', _global_aio_state.engine)
 
     # Initializes the process-level state accordingly
     if _global_aio_state.engine is AsyncIOEngine.POLLER:
@@ -83,8 +82,7 @@ cdef _actual_aio_shutdown():
         raise ValueError('Unsupported engine type [%s]' % _global_aio_state.engine)
 
 
-cdef _initialize_per_loop():
-    cdef object loop = get_working_loop()
+cdef _initialize_per_loop(object loop):
     if _global_aio_state.engine is AsyncIOEngine.POLLER:
         _global_aio_state.cq.bind_loop(loop)
 
@@ -95,11 +93,25 @@ cpdef init_grpc_aio():
     Expected to be invoked on critical class constructors.
     E.g., AioChannel, AioServer.
     """
+    cdef object initialized_engine = None
     with _global_aio_state.lock:
         _global_aio_state.refcount += 1
         if _global_aio_state.refcount == 1:
             _actual_aio_initialization()
-        _initialize_per_loop()
+            initialized_engine = _global_aio_state.engine
+
+    # Resolving the loop can log, even when DEBUG is disabled. Logging may
+    # acquire its module lock while another thread holds that lock and runs
+    # a cyclic-GC finalizer that calls shutdown_grpc_aio(). Keep logging out
+    # of the global AIO critical section to avoid this lock inversion.
+    # The reference acquired above keeps the shared state alive here, and
+    # balances __dealloc__ even if loop lookup raises during construction.
+    cdef object loop = get_working_loop()
+    with _global_aio_state.lock:
+        _initialize_per_loop(loop)
+
+    if initialized_engine is not None:
+        _LOGGER.debug('Using %s as I/O engine', initialized_engine)
 
 
 cpdef shutdown_grpc_aio():
