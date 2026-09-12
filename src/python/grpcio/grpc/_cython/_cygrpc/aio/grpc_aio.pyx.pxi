@@ -101,7 +101,6 @@ cpdef init_grpc_aio():
             initialized_engine = _global_aio_state.engine
 
     # Loop lookup can log, so release the lock first (#43421).
-    # Keep the AIO reference so failed constructors can clean up safely.
     cdef object loop = get_working_loop()
     with _global_aio_state.lock:
         _initialize_per_loop(loop)
