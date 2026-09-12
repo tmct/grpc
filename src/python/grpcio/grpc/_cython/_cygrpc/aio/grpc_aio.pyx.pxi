@@ -100,12 +100,8 @@ cpdef init_grpc_aio():
             _actual_aio_initialization()
             initialized_engine = _global_aio_state.engine
 
-    # Resolving the loop can log, even when DEBUG is disabled. Logging may
-    # acquire its module lock while another thread holds that lock and runs
-    # a cyclic-GC finalizer that calls shutdown_grpc_aio(). Keep logging out
-    # of the global AIO critical section to avoid this lock inversion.
-    # The reference acquired above keeps the shared state alive here, and
-    # balances __dealloc__ even if loop lookup raises during construction.
+    # Loop lookup can log, so release the lock first (#43421).
+    # Keep the AIO reference so failed constructors can clean up safely.
     cdef object loop = get_working_loop()
     with _global_aio_state.lock:
         _initialize_per_loop(loop)
